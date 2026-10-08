@@ -51,6 +51,30 @@ public class VacancyService {
         return vacancyRepository.save(v);
     }
 
+    @Transactional
+    public Vacancy update(CurrentUser user, UUID id, CreateRequest req) {
+        EmployerProfile employer = employerService.requireMine(user);
+        Vacancy vacancy = vacancyRepository.findById(id)
+                .orElseThrow(() -> ApiException.notFound("Вакансия не найдена"));
+        if (!vacancy.getEmployerId().equals(employer.getId())) {
+            throw ApiException.forbidden("Чужая вакансия");
+        }
+        if (req.salaryFrom() <= 0 || req.salaryTo() < req.salaryFrom()) {
+            throw ApiException.badState("Зарплата обязательна");
+        }
+        vacancy.setTitle(req.title());
+        vacancy.setDescription(req.description());
+        vacancy.setIndustryCode(req.industryCode());
+        vacancy.setSpecializationCode(req.specializationCode());
+        vacancy.setGrade(Grade.from(req.grade()));
+        vacancy.setStack(req.stack() == null ? List.of() : req.stack());
+        vacancy.setSalaryFrom(req.salaryFrom());
+        vacancy.setSalaryTo(req.salaryTo());
+        vacancy.setStatus(req.publish() ? VacancyStatus.PUBLISHED : VacancyStatus.DRAFT);
+        vacancy.setUpdatedAt(Instant.now());
+        return vacancyRepository.save(vacancy);
+    }
+
     @Transactional(readOnly = true)
     public List<Vacancy> listPublished() {
         return vacancyRepository.findByStatus(VacancyStatus.PUBLISHED);

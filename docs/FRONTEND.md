@@ -176,6 +176,7 @@ Local: `X-User-Email` + `X-User-Role`
 | GET | `/vacancies` | опубликованные |
 | GET | `/vacancies/mine` | работодателя |
 | POST | `/vacancies` | create |
+| PUT | `/vacancies/{id}` | редактирование своей вакансии, то же тело, что при создании |
 | POST | `/vacancies/{id}/applications` | `{coverLetter}` |
 | GET | `/vacancies/applications/mine` | |
 | GET | `/vacancies/{id}/applications` | работодатель |

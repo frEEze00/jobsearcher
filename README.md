@@ -1,42 +1,58 @@
-# Jobsearcher (ФСП) — backend
+# Jobsearcher (ФСП)
 
 Цифровая платформа подбора ИТ-специалистов с обратной механикой: кандидат проходит опрос и тест, получает категорию; работодатель ищет по категориям и сам направляет приглашение.
 
-## Быстрый старт
+## Запуск на Windows (PowerShell)
 
-```bash
-cp .env.example .env
-# заполнить OLLAMA_API_KEY и/или INFERECO_API_KEY
+Нужны Docker Desktop и Node.js. Команды ниже запускают backend с PostgreSQL в Docker и два кабинета через Vite. Keycloak для локального запуска не нужен.
 
+**Терминал 1 — backend и база**, из корня репозитория:
+
+```powershell
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 docker compose up -d --build
-curl -sf http://localhost:8080/actuator/health
+Invoke-RestMethod http://localhost:8080/actuator/health
 ```
 
-Swagger: http://localhost:8080/swagger-ui.html
+Дождитесь ответа `status: UP` перед открытием кабинетов. Если backend ещё запускается, интерфейс покажет предупреждение; после запуска нажмите «Проверить снова».
 
-### Локально без Docker-приложения
+**Терминал 2 — кабинет работника**, из корня репозитория:
 
-```bash
-docker compose up -d postgres keycloak
-cd backend
-export JAVA_HOME=$(/usr/libexec/java_home -v 21)
-./gradlew bootRun --args='--spring.profiles.active=local'
+```powershell
+cd frontend
+if (!(Test-Path .env.local)) { Copy-Item .env.example .env.local }
+npm ci
+npm run dev:candidate
 ```
 
-В профиле `local` включён dev-auth: заголовки `X-User-Email`, `X-User-Role` (`CANDIDATE`|`EMPLOYER`|`ADMIN`).
+**Терминал 3 — кабинет работодателя**, из корня репозитория:
+
+```powershell
+cd frontend
+npm run dev:employer
+```
+
+Открыть: работник — http://localhost:5173/, работодатель — http://localhost:5174/, Swagger — http://localhost:8080/swagger-ui.html. Логин не требуется. Ключи `OLLAMA_API_KEY` и `INFERECO_API_KEY` в `.env` нужны только для функций LLM.
+
+**Остановка:** нажмите `Ctrl+C` в терминалах 2 и 3, затем из корня репозитория выполните:
+
+```powershell
+docker compose down
+```
+
+Данные PostgreSQL остаются в Docker volume. Контейнерная база не занимает порт 5432 на Windows.
 
 ## Контракт для фронтенда
+
+Фронтенд с двумя кабинетами находится в [`frontend/`](frontend/README.md).
 
 Полный контракт: [docs/FRONTEND.md](docs/FRONTEND.md)  
 OpenAPI: `/v3/api-docs`  
 Базовый URL API: `/api/v1`
 
-### Auth
+### Локальный вход
 
-- Production: Bearer JWT из Keycloak realm `jobsearcher` (клиент `jobsearcher-frontend`)
-- Роли realm: `CANDIDATE`, `EMPLOYER`, `ADMIN`
-- Демо-пользователи Keycloak: `candidate1`/`candidate2`/`employer1`/`employer2`, пароль `pass`
-- Local/dev: `X-User-Email` + `X-User-Role`
+Локальный запуск не требует логина и Keycloak. Кабинеты автоматически используют демо-пользователей через заголовки `X-User-Email` и `X-User-Role`. Роль можно сменить в меню пользователя.
 
 ### Главный пользовательский сценарий
 

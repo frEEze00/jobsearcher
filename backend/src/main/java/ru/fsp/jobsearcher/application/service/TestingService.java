@@ -1,5 +1,6 @@
 package ru.fsp.jobsearcher.application.service;
 
+import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,6 +40,7 @@ public class TestingService {
     private final TestItemRepository testItemRepository;
     private final TestSessionRepository testSessionRepository;
     private final GradeChangeLogRepository gradeChangeLogRepository;
+    private final EntityManager entityManager;
     private final GradeChangePolicy gradeChangePolicy;
 
     @Transactional
@@ -78,6 +80,7 @@ public class TestingService {
         session.setSectionScores(new HashMap<>());
         session.setStartedAt(Instant.now());
         TestSession saved = testSessionRepository.save(session);
+        entityManager.detach(saved);
         saved.setItems(publicItems);
         return saved;
     }
@@ -112,9 +115,9 @@ public class TestingService {
         }
         if (normalized.contains("COPY")) {
             // soft signal - keep going but record
-            return testSessionRepository.save(session);
+            return publicSession(testSessionRepository.save(session));
         }
-        return testSessionRepository.save(session);
+        return publicSession(testSessionRepository.save(session));
     }
 
     @Transactional(readOnly = true)
@@ -125,8 +128,7 @@ public class TestingService {
         if (!session.getCandidateId().equals(profile.getId()) && user.role() != UserRole.ADMIN) {
             throw ApiException.forbidden("Чужой тест");
         }
-        session.setItems(session.getItems().stream().map(this::publicItem).toList());
-        return session;
+        return publicSession(session);
     }
 
     private TestSession finalizeSession(CandidateProfile profile, TestSession session, String failReason) {
@@ -186,8 +188,7 @@ public class TestingService {
         log.setChangedAt(Instant.now());
         gradeChangeLogRepository.save(log);
 
-        session.setItems(session.getItems().stream().map(this::publicItem).toList());
-        return session;
+        return publicSession(session);
     }
 
     private TestSession ownedInProgress(CurrentUser user, CandidateProfile profile, UUID sessionId) {
@@ -219,6 +220,12 @@ public class TestingService {
         Map<String, Object> copy = new LinkedHashMap<>(item);
         copy.remove("expected");
         return copy;
+    }
+
+    private TestSession publicSession(TestSession session) {
+        entityManager.detach(session);
+        session.setItems(session.getItems().stream().map(this::publicItem).toList());
+        return session;
     }
 
     private static String humanFail(String code) {
