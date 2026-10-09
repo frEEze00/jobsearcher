@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, type FormEvent } from 'react';
+import React, { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ArrowRight, Award, BriefcaseBusiness, Check, CheckCircle2, Clock3, FileText, GraduationCap, LayoutDashboard, MapPin, MessageCircle, Search, Settings2, ShieldCheck, Sparkles, UploadCloud, UserRound } from 'lucide-react';
 import { api, AuthGate, AuthProvider, Badge, Banner, brandFace, Button, Card, ChatPanel, Empty, Feedback, Field, formatDate, get, gradeName, Loading, Modal, PageHeader, post, put, salaryRange, Shell, Stat, statusName, tags, useAuth, useMutation, useResource, type Application, type CandidateProfile, type Consent, type ConsentType, type FspSummary, type Grade, type Industry, type Invitation, type Questionnaire, type Specialization, type SurveyQuestion, type SurveySession, type TestItem, type TestSession, type Vacancy } from '@jobsearcher/shared';
@@ -23,21 +23,34 @@ const pageFromHash = () => {
 function App() {
   const { loading: authLoading } = useAuth();
   const [page, setPage] = useState(pageFromHash);
-  const go = (p: string) => { location.hash = p; setPage(p); window.scrollTo(0, 0); };
+  const testLock = useRef(false);
+  const [navigationLocked, setNavigationLocked] = useState(false);
+  const lockNavigation = useCallback((locked: boolean) => {
+    testLock.current = locked;
+    setNavigationLocked(locked);
+  }, []);
+  const syncPage = useCallback(() => {
+    if (testLock.current) {
+      history.replaceState(null, '', location.pathname + location.search + '#testing');
+      return;
+    }
+    setPage(pageFromHash());
+  }, []);
+  const go = (p: string) => { if (testLock.current) return; location.hash = p; setPage(p); window.scrollTo(0, 0); };
   useEffect(() => {
-    const sync = () => setPage(pageFromHash());
+    const sync = syncPage;
     if (location.hash === '#/chat' || location.hash === '#chat') history.replaceState(null, '', location.pathname + location.search);
     sync();
     window.addEventListener('hashchange', sync);
     window.addEventListener('pageshow', sync);
     window.addEventListener('popstate', sync);
     return () => { window.removeEventListener('hashchange', sync); window.removeEventListener('pageshow', sync); window.removeEventListener('popstate', sync); };
-  }, []);
-  useEffect(() => { if (!authLoading) setPage(pageFromHash()); }, [authLoading]);
-  return <AuthGate role="CANDIDATE"><Shell role="CANDIDATE" page={page} setPage={go} nav={nav}>
+  }, [syncPage]);
+  useEffect(() => { if (!authLoading) syncPage(); }, [authLoading, syncPage]);
+  return <AuthGate role="CANDIDATE"><Shell role="CANDIDATE" page={page} setPage={go} nav={nav} navigationLocked={navigationLocked}>
     {page === 'overview' && <Overview go={go}/>}
     {page === 'profile' && <Profile/>}
-    {page === 'testing' && <Testing/>}
+    {page === 'testing' && <Testing lockNavigation={lockNavigation}/>}
     {page === 'vacancies' && <Vacancies/>}
     {page === 'invitations' && <Invitations go={go}/>}
     {page === 'chats' && <><PageHeader eyebrow="Связь" title="Сообщения" description="Общайтесь с работодателями по приглашениям."/><ChatPanel/></>}
@@ -102,7 +115,7 @@ function Invitations({ go }: { go: (p:string)=>void }) {
   return <><PageHeader eyebrow="ПРЕДЛОЖЕНИЯ" title="Приглашения" description="Зарплата и условия видны до начала общения."/><Feedback error={mutation.error} success={mutation.success}/>{resource.loading ? <Loading/> : resource.error ? <Feedback error={resource.error}/> : resource.data?.length ? <div className="list">{resource.data.map(inv=><Card key={inv.id} className="invite-card"><div className="candidate-card-top"><div><div className="eyebrow">{inv.companyName}</div><h2 style={{fontSize:18,margin:'7px 0'}}>{inv.vacancyId ? 'Приглашение по вакансии' : 'Личное приглашение'}</h2><p className="muted-line">{formatDate(inv.createdAt)}</p></div><Badge tone={inv.status==='ACCEPTED'?'green':inv.status==='DECLINED'?'red':'orange'}>{statusName(inv.status)}</Badge></div><p style={{fontSize:12,whiteSpace:'pre-wrap'}}>{inv.message}</p><strong style={{fontSize:15}}>{salaryRange(inv.salaryFrom,inv.salaryTo)}</strong>{inv.status==='DECLINED'&&inv.declineReason&&<Banner type="warning">Причина отказа: {inv.declineReason}</Banner>}{inv.status==='ACCEPTED'&&<p className="muted-line">Контакты доступны в переписке.</p>}<div className="form-actions" style={{justifyContent:'flex-start'}}>{['SENT','VIEWED'].includes(inv.status) && <><Button onClick={()=>void change(inv,'ACCEPTED')} busy={mutation.busy}>Принять предложение</Button><Button variant="secondary" onClick={()=>setDeclining(inv)}>Отклонить</Button></>}{inv.chatThreadId && <Button variant="ghost" onClick={()=>go('chats')}>Открыть чат <ArrowRight size={15}/></Button>}</div></Card>)}</div> : <Empty title="Пока нет приглашений" description="Опубликуйте подтверждённый профиль, чтобы работодатели могли найти вас."/>}{declining && <Modal title="Причина отказа" onClose={()=>setDeclining(null)}><p className="muted-line">Работодатель увидит причину вашего решения.</p><Field label="Почему вы отклоняете предложение?"><textarea required value={reason} onChange={e=>setReason(e.target.value)} placeholder="Например, не подходит формат работы"/></Field><div className="form-actions"><Button variant="secondary" onClick={()=>setDeclining(null)}>Отмена</Button><Button disabled={!reason.trim()} busy={mutation.busy} onClick={()=>void change(declining,'DECLINED',reason.trim())}>Отклонить</Button></div></Modal>}</>;
 }
 
-function Testing() {
+function Testing({ lockNavigation }: { lockNavigation: (locked: boolean) => void }) {
   const profile = useResource(() => get<CandidateProfile>('/candidate/profile'));
   const surveys = useResource(() => get<Questionnaire[]>('/surveys?audience=CANDIDATE&industryCode=IT'));
   const [step, setStep] = useState<'intro'|'survey'|'ready'|'test'|'result'>('intro');
@@ -110,23 +123,25 @@ function Testing() {
   const [targetGrade, setTargetGrade] = useState<Grade>('JUNIOR'); const [test, setTest] = useState<TestSession | null>(null); const [index, setIndex] = useState(0); const [answers, setAnswers] = useState<Record<string,string>>({}); const [failed, setFailed] = useState(false); const [fullscreenError, setFullscreenError] = useState('');
   const mutation = useMutation(); const proctorSent = useRef(false); const active = useRef(false);
   useEffect(() => { if (profile.data?.claimedGrade) setTargetGrade(profile.data.claimedGrade); }, [profile.data]);
-  useEffect(() => { const id = sessionStorage.getItem('active-test'); if (!id) return; void get<TestSession>(`/tests/sessions/${id}`).then(async s=>{ if (s.status==='IN_PROGRESS' && !document.fullscreenElement) { const failedSession=await post<TestSession>(`/tests/sessions/${id}/proctor`,{event:'LEAVE_WINDOW',detail:'Страница теста перезагружена'}); setTest(failedSession); setFailed(true); setStep('result'); } else if (s.status==='IN_PROGRESS') { setTest(s); setStep('test'); active.current=true; } else { setTest(s); setFailed(s.failReason==='LEFT_WINDOW'); setStep('result'); } sessionStorage.removeItem('active-test'); }).catch(()=>sessionStorage.removeItem('active-test')); }, []);
+  useEffect(() => { const id = sessionStorage.getItem('active-test'); if (!id) return; lockNavigation(true); void get<TestSession>(`/tests/sessions/${id}`).then(async s=>{ if (s.status==='IN_PROGRESS' && !document.fullscreenElement) { const failedSession=await post<TestSession>(`/tests/sessions/${id}/proctor`,{event:'LEAVE_WINDOW',detail:'Страница теста перезагружена'}); setTest(failedSession); setFailed(true); setStep('result'); } else if (s.status==='IN_PROGRESS') { setTest(s); setStep('test'); active.current=true; } else { setTest(s); setFailed(s.failReason==='LEFT_WINDOW'); setStep('result'); } sessionStorage.removeItem('active-test'); }).catch(()=>sessionStorage.removeItem('active-test')).finally(()=>{ if (!active.current) lockNavigation(false); }); }, [lockNavigation]);
+  useEffect(() => () => lockNavigation(false), [lockNavigation]);
   useEffect(() => {
     if (step !== 'test' || !test) return;
     active.current = true;
-    const report = (event:string) => { if (!active.current || proctorSent.current) return; proctorSent.current=true; active.current=false; void api<TestSession>(`/tests/sessions/${test.id}/proctor`,{method:'POST',body:JSON.stringify({event,detail:'Событие браузера во время теста'}),keepalive:true}).then(s=>{ setTest(s); setFailed(true); setStep('result'); sessionStorage.removeItem('active-test'); }).catch(()=>{ setFailed(true); setStep('result'); sessionStorage.removeItem('active-test'); }); };
+    const report = (event:string) => { if (!active.current || proctorSent.current) return; proctorSent.current=true; active.current=false; void api<TestSession>(`/tests/sessions/${test.id}/proctor`,{method:'POST',body:JSON.stringify({event,detail:'Событие браузера во время теста'}),keepalive:true}).then(s=>{ setTest(s); setFailed(true); setStep('result'); lockNavigation(false); sessionStorage.removeItem('active-test'); }).catch(()=>{ setFailed(true); setStep('result'); lockNavigation(false); sessionStorage.removeItem('active-test'); }); };
     const hidden = () => { if (document.hidden) report('TAB_HIDDEN'); };
     const blur = () => report('BLUR');
+    const leavePage = () => report('LEAVE_WINDOW');
     const fullscreen = () => { if (!document.fullscreenElement) report('LEAVE_WINDOW'); };
     const clipboard = (e: Event) => { e.preventDefault(); void post(`/tests/sessions/${test.id}/proctor`,{event:'COPY_ATTEMPT',detail:e.type}).catch(()=>{}); };
-    document.addEventListener('visibilitychange',hidden); document.addEventListener('fullscreenchange',fullscreen); window.addEventListener('blur',blur);
+    document.addEventListener('visibilitychange',hidden); document.addEventListener('fullscreenchange',fullscreen); window.addEventListener('blur',blur); window.addEventListener('pagehide',leavePage);
     ['copy','cut','paste'].forEach(t=>document.addEventListener(t,clipboard));
-    return () => { active.current=false; document.removeEventListener('visibilitychange',hidden); document.removeEventListener('fullscreenchange',fullscreen); window.removeEventListener('blur',blur); ['copy','cut','paste'].forEach(t=>document.removeEventListener(t,clipboard)); };
-  }, [step,test?.id]);
+    return () => { active.current=false; document.removeEventListener('visibilitychange',hidden); document.removeEventListener('fullscreenchange',fullscreen); window.removeEventListener('blur',blur); window.removeEventListener('pagehide',leavePage); ['copy','cut','paste'].forEach(t=>document.removeEventListener(t,clipboard)); };
+  }, [step,test?.id,lockNavigation]);
   async function startSurvey() { const q=surveys.data?.find(x=>x.code==='IT_CANDIDATE') || surveys.data?.[0]; if (!q) return; const result=await mutation.run(async()=>{ const questions=await get<SurveyQuestion[]>(`/surveys/${q.id}/questions`); const session=await post<SurveySession>('/surveys/sessions',{questionnaireCode:q.code}); return {questions,session}; },'Анкета начата'); if (result) { setSurvey(q); setQuestions(result.questions.sort((a,b)=>a.sortOrder-b.sortOrder)); setSurveySession(result.session); setStep('survey'); } }
   async function completeSurvey() { if (!surveySession) return; const result=await mutation.run(async()=>{ await post(`/surveys/sessions/${surveySession.id}/answers`,surveyAnswers); return post(`/surveys/sessions/${surveySession.id}/complete`); },'Анкета завершена'); if (result) { setStep('ready'); void profile.reload(); } }
-  async function startTest() { setFullscreenError(''); try { await document.documentElement.requestFullscreen(); } catch { setFullscreenError('Разрешите полноэкранный режим, чтобы начать тест.'); return; } const result=await mutation.run(()=>post<TestSession>('/tests/sessions',{targetGrade}),'Тест начат'); if (result) { proctorSent.current=false; setTest(result); setAnswers({}); setIndex(0); setFailed(false); active.current=true; sessionStorage.setItem('active-test',result.id); setStep('test'); } else if (document.fullscreenElement) void document.exitFullscreen(); }
-  async function submitTest() { if (!test) return; active.current=false; const result=await mutation.run(()=>post<TestSession>(`/tests/sessions/${test.id}/submit`,answers),'Тест завершён'); if (result) { setTest(result); setStep('result'); sessionStorage.removeItem('active-test'); if (document.fullscreenElement) void document.exitFullscreen(); void profile.reload(); } else active.current=true; }
+  async function startTest() { lockNavigation(true); setFullscreenError(''); try { await document.documentElement.requestFullscreen(); } catch { lockNavigation(false); setFullscreenError('Разрешите полноэкранный режим, чтобы начать тест.'); return; } const result=await mutation.run(()=>post<TestSession>('/tests/sessions',{targetGrade}),'Тест начат'); if (result) { proctorSent.current=false; setTest(result); setAnswers({}); setIndex(0); setFailed(false); active.current=true; sessionStorage.setItem('active-test',result.id); setStep('test'); } else { lockNavigation(false); if (document.fullscreenElement) void document.exitFullscreen(); } }
+  async function submitTest() { if (!test) return; active.current=false; const result=await mutation.run(()=>post<TestSession>(`/tests/sessions/${test.id}/submit`,answers),'Тест завершён'); if (result) { setTest(result); setStep('result'); lockNavigation(false); sessionStorage.removeItem('active-test'); if (document.fullscreenElement) void document.exitFullscreen(); void profile.reload(); } else active.current=true; }
   const item: TestItem | undefined = test?.items?.[index]; const sectionLabel = {A:'Теория',B:'Практика',C:'Олимпиадная практика'};
   return <><PageHeader eyebrow="ПОДТВЕРЖДЕНИЕ НАВЫКОВ" title="Тестирование" description="Анкета и задания определят вашу категорию и подтверждённый грейд."/>{step==='intro' && <div className="grid main-side"><Card title="Ваш путь к категории" subtitle="Три простых этапа"><div className="steps"><div className="step"><span className="step-number">1</span><span>Анкета<small>Ваши интересы и роль</small></span></div><div className="step"><span className="step-number">2</span><span>Выбор грейда<small>Junior, Middle или Senior</small></span></div><div className="step"><span className="step-number">3</span><span>Тест A / B / C<small>Теория и практика</small></span></div></div><div style={{marginTop:20}}><Feedback error={surveys.error || mutation.error} success={mutation.success}/><Button onClick={()=>void startSurvey()} disabled={!surveys.data?.length} busy={mutation.busy}>Начать с анкеты <ArrowRight size={16}/></Button>{!surveys.data?.length&&!surveys.loading&&<p className="muted-line">Анкета пока недоступна на сервере.</p>}</div></Card><Card title="Текущий результат"><div className="detail-pair"><span>Категория</span><strong>{profile.data?.categoryCode || 'Не определена'}</strong></div><div className="detail-pair"><span>Грейд</span><strong>{gradeName(profile.data?.assignedGrade)}</strong></div><div className="detail-pair"><span>Подтверждён</span><strong>{profile.data?.gradeConfirmed?'Да':'Нет'}</strong></div><Banner type="info">Повторное тестирование доступно не чаще одного раза в 30 дней.</Banner></Card></div>}
   {step==='survey' && <Card title={survey?.title || 'Анкета'} subtitle="Ответьте на вопросы перед тестом"><div className="list">{questions.map((q,i)=><div key={q.id} style={{padding:'13px 0',borderBottom:'1px solid #f0eef5'}}><strong style={{fontSize:12}}>{i+1}. {q.text}</strong>{q.options?.length ? <div style={{marginTop:9}}>{q.options.map(opt=><label className="answer-option" key={opt.code}><input type="radio" name={q.code} checked={surveyAnswers[q.code]===opt.code} onChange={()=>setSurveyAnswers(s=>({...s,[q.code]:opt.code}))}/>{opt.label}</label>)}</div> : <input className="input" style={{marginTop:10}} value={surveyAnswers[q.code]||''} onChange={e=>setSurveyAnswers(s=>({...s,[q.code]:e.target.value}))}/>}</div>)}</div><Feedback error={mutation.error}/><div className="form-actions"><Button disabled={questions.some(q=>!surveyAnswers[q.code])} busy={mutation.busy} onClick={()=>void completeSurvey()}>Продолжить к тесту <ArrowRight size={15}/></Button></div></Card>}

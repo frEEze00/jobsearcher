@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client';
 import { ArrowRight, Award, BriefcaseBusiness, Building2, CheckCircle2, Filter, LayoutDashboard, MapPin, MessageCircle, Plus, Search, Send, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import { AuthGate, AuthProvider, Badge, Banner, brandMap, Button, Card, ChatPanel, Empty, Feedback, Field, formatDate, get, gradeName, Loading, Modal, PageHeader, post, put, salaryRange, Shell, Stat, statusName, tags, useAuth, useMutation, useResource, type Application, type CandidateView, type EmployerProfile, type Grade, type Industry, type Invitation, type MatchResponse, type Need, type RankedCandidate, type Specialization, type Vacancy } from '@jobsearcher/shared';
 import '@jobsearcher/shared/styles.css';
-import '@jobsearcher/shared/brand.css';
 
 const nav = [
   {id:'overview',label:'Обзор',icon:<LayoutDashboard size={19}/>},
